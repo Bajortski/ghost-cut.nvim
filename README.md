@@ -1,17 +1,7 @@
 # ghost-cut.nvim
+A "ghost cut" plugin for Neovim, inspired by [Will McGugan's prose-editor concept](https://x.com/willmcgugan/status/2074177362636538304) and programmed by Claude Fable.
 
-A "ghost cut" for Neovim, inspired by [Will McGugan's prose-editor
-idea](https://x.com/willmcgugan).
-
-Normally when you cut text the document **reflows immediately**, so you lose your
-place and have to reorient before pasting. Ghost cut instead leaves the cut text
-in place but **dimmed and struck through** — nothing reflows. The text only
-actually leaves its original spot once you **paste** it somewhere else.
-
-It's built for _moving_ prose around: cut, glance at where it should go, paste,
-and the text relocates cleanly with no mid-edit reflow.
-
-## Flow
+## Usage
 
 | Key | When | Does |
 |-----|------|------|
