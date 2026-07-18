@@ -56,9 +56,6 @@ opts = {
 }
 ```
 
-The default is `gX` rather than `gx` or `gc`, since those are Neovim's built-in
-"open with system app" and comment-toggle bindings.
-
 Restrict to prose and link the ghost to your `Comment` colour, for example:
 ```lua
 opts = {
