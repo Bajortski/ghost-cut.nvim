@@ -6,7 +6,7 @@
 -- actually leaves its original spot once you PASTE it somewhere else.
 --
 -- Flow:
---   * visual select -> `gx`      ghost-cut the selection (stays visible, ghosted)
+--   * visual select -> `gX`      ghost-cut the selection (stays visible, ghosted)
 --   * move cursor   -> `p` / `P` paste at the new spot AND remove the ghost
 --   * while ghosted -> `<Esc>`   cancel (un-ghost, leave the text where it is)
 --
@@ -18,7 +18,9 @@ local M = {}
 ---@class GhostCut.Config
 local defaults = {
   -- Visual-mode key that ghost-cuts the selection.
-  cut_key = "gx",
+  -- (Default is gX, not gx: gx is Neovim's built-in "open with system app",
+  -- and gc is the built-in comment toggle.)
+  cut_key = "gX",
   -- Normal-mode keys, active ONLY while a cut is pending, that paste the ghost
   -- at the cursor and remove it from its origin.
   paste_after_key = "p",
@@ -223,8 +225,8 @@ function M.setup(opts)
   end
 
   if cfg.filetypes and #cfg.filetypes > 0 then
-    -- Buffer-local trigger on the configured filetypes only, so the default
-    -- `gx` (open URL) is preserved elsewhere.
+    -- Buffer-local trigger on the configured filetypes only, so any global
+    -- binding on the key is preserved elsewhere.
     vim.api.nvim_create_autocmd("FileType", {
       group = grp,
       pattern = cfg.filetypes,
@@ -232,8 +234,7 @@ function M.setup(opts)
     })
     if vim.tbl_contains(cfg.filetypes, vim.bo.filetype) then map_cut(0) end
   else
-    -- Global trigger (shadows the niche visual-mode "open selection as URL";
-    -- normal-mode `gx` is untouched).
+    -- Global trigger.
     map_cut(nil)
   end
 

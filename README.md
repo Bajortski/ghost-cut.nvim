@@ -5,13 +5,13 @@ A "ghost cut" plugin for Neovim, inspired by [Will McGugan's prose-editor concep
 
 | Key | When | Does |
 |-----|------|------|
-| `gx` | visual mode | Ghost-cut the selection (stays visible, ghosted) |
+| `gX` | visual mode | Ghost-cut the selection (stays visible, ghosted) |
 | `p` / `P` | while a cut is pending | Paste at the cursor **and** remove the ghost from its origin |
 | `<Esc>` | while a cut is pending | Cancel — un-ghost, leave the text where it is |
 
 - Works across buffers: ghost-cut in one file, paste in another.
 - A same-buffer moves are a single undo (`u` puts it back).
-- A new `gx` supersedes an un-pasted ghost.
+- A new `gX` supersedes an un-pasted ghost.
 - `p` / `P` / `<Esc>` are only overridden while a cut is pending, and only
   buffer-locally, so your normal paste/escape (and plugins like
   [yanky.nvim](https://github.com/gbprod/yanky.nvim)) are untouched otherwise.
@@ -21,7 +21,7 @@ A "ghost cut" plugin for Neovim, inspired by [Will McGugan's prose-editor concep
 ```lua
 {
   "Bajortski/ghost-cut.nvim",
-  keys = { { "gx", mode = "x", desc = "Ghost cut selection" } },
+  keys = { { "gX", mode = "x", desc = "Ghost cut selection" } },
   opts = {},
 }
 ```
@@ -30,7 +30,7 @@ Local checkout (dev):
 ```lua
 {
   dir = "~/Projects/ghost-cut.nvim",
-  keys = { { "gx", mode = "x", desc = "Ghost cut selection" } },
+  keys = { { "gX", mode = "x", desc = "Ghost cut selection" } },
   opts = {},
 }
 ```
@@ -43,7 +43,7 @@ mapping is created before you need it.
 
 ```lua
 opts = {
-  cut_key          = "gx",   -- visual-mode key to ghost-cut the selection
+  cut_key          = "gX",   -- visual-mode key to ghost-cut the selection
   paste_after_key  = "p",    -- pending-only: paste after cursor + un-ghost
   paste_before_key = "P",    -- pending-only: paste before cursor + un-ghost
   cancel_key       = "<Esc>",-- pending-only: cancel, keep the text
@@ -55,6 +55,9 @@ opts = {
   commands  = true,          -- create :GhostCutPaste / :GhostCutCancel
 }
 ```
+
+The default is `gX` rather than `gx` or `gc`, since those are Neovim's built-in
+"open with system app" and comment-toggle bindings.
 
 Restrict to prose and link the ghost to your `Comment` colour, for example:
 ```lua
