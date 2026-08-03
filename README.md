@@ -82,5 +82,17 @@ Also `:GhostCutPaste` and `:GhostCutCancel`.
   paste or cancel.
 - Special buffers (terminals, pickers, help) are skipped.
 
+## Development
+
+Run the test suite from the repo root:
+
+```sh
+nvim --headless -l tests/run.lua
+```
+
+It drives the real keymaps with `feedkeys`, covering charwise and linewise cuts, paste,
+cancel, single-step undo, the blockwise and special-buffer guards, filetype gating, and
+setup options.
+
 ## License
 I do not care what you do with this.

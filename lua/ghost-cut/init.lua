@@ -13,6 +13,8 @@
 -- `p`/`P`/`<Esc>` are only overridden while a cut is pending, and buffer-local,
 -- so any existing global mappings (e.g. yanky.nvim) are untouched otherwise.
 
+local api = vim.api
+
 local M = {}
 
 ---@class GhostCut.Config
@@ -42,8 +44,7 @@ local defaults = {
 ---@type GhostCut.Config
 local cfg = vim.deepcopy(defaults)
 
-local ns = vim.api.nvim_create_namespace("ghost-cut")
-local grp
+local ns = api.nvim_create_namespace("ghost-cut")
 -- Single pending slot: { buf, mark_id, lines, linewise, n }
 local pending = nil
 -- Buffers the pending override is installed on, and the pending-scoped augroup
@@ -62,33 +63,46 @@ end
 
 local function set_hl()
   if type(cfg.highlight) == "string" then
-    vim.api.nvim_set_hl(0, "GhostCut", { link = cfg.highlight })
+    api.nvim_set_hl(0, "GhostCut", { link = cfg.highlight })
   else
-    vim.api.nvim_set_hl(0, "GhostCut", cfg.highlight)
+    api.nvim_set_hl(0, "GhostCut", cfg.highlight)
   end
+end
+
+-- The normal-mode keys that exist only while a cut is pending. One definition
+-- drives both install and removal, so the two can't drift apart.
+local function pending_keys()
+  return {
+    { lhs = cfg.paste_after_key, desc = "Ghost paste (after)", rhs = function() M.paste(true) end },
+    { lhs = cfg.paste_before_key, desc = "Ghost paste (before)", rhs = function() M.paste(false) end },
+    {
+      lhs = cfg.cancel_key,
+      desc = "Cancel ghost cut",
+      rhs = function()
+        M.cancel()
+        if cfg.cancel_clears_search then vim.cmd("nohlsearch") end
+      end,
+    },
+  }
 end
 
 -- Buffer-local override installed while a cut is pending. Kept buffer-local so it
 -- merely shadows any global `p`/`P` and reverts cleanly when removed.
 local function install_put_maps(buf)
-  if installed[buf] or not vim.api.nvim_buf_is_valid(buf) then return end
-  vim.keymap.set("n", cfg.paste_after_key, function() M.paste(true) end,
-    { buffer = buf, silent = true, desc = "Ghost paste (after)" })
-  vim.keymap.set("n", cfg.paste_before_key, function() M.paste(false) end,
-    { buffer = buf, silent = true, desc = "Ghost paste (before)" })
-  vim.keymap.set("n", cfg.cancel_key, function()
-    M.cancel()
-    if cfg.cancel_clears_search then vim.cmd("nohlsearch") end
-  end, { buffer = buf, silent = true, desc = "Cancel ghost cut" })
+  if installed[buf] or not api.nvim_buf_is_valid(buf) then return end
+  for _, k in ipairs(pending_keys()) do
+    vim.keymap.set("n", k.lhs, k.rhs, { buffer = buf, silent = true, desc = k.desc })
+  end
   installed[buf] = true
 end
 
 local function remove_put_maps()
+  local keys = pending_keys()
   for buf in pairs(installed) do
-    if vim.api.nvim_buf_is_valid(buf) then
-      pcall(vim.keymap.del, "n", cfg.paste_after_key, { buffer = buf })
-      pcall(vim.keymap.del, "n", cfg.paste_before_key, { buffer = buf })
-      pcall(vim.keymap.del, "n", cfg.cancel_key, { buffer = buf })
+    if api.nvim_buf_is_valid(buf) then
+      for _, k in ipairs(keys) do
+        pcall(vim.keymap.del, "n", k.lhs, { buffer = buf })
+      end
     end
   end
   installed = {}
@@ -98,12 +112,12 @@ end
 -- everywhere. Leaves the buffer text untouched (it was never removed).
 local function clear()
   if not pending then return end
-  if vim.api.nvim_buf_is_valid(pending.buf) then
-    pcall(vim.api.nvim_buf_del_extmark, pending.buf, ns, pending.mark_id)
+  if api.nvim_buf_is_valid(pending.buf) then
+    pcall(api.nvim_buf_del_extmark, pending.buf, ns, pending.mark_id)
   end
   remove_put_maps()
   if pend_grp then
-    pcall(vim.api.nvim_del_augroup_by_id, pend_grp)
+    pcall(api.nvim_del_augroup_by_id, pend_grp)
     pend_grp = nil
   end
   pending = nil
@@ -111,15 +125,28 @@ end
 
 -- Exclusive byte column just past the (possibly multibyte) char at col0.
 local function char_end_col(buf, row0, col0)
-  local line = vim.api.nvim_buf_get_lines(buf, row0, row0 + 1, false)[1] or ""
+  local line = api.nvim_buf_get_lines(buf, row0, row0 + 1, false)[1] or ""
   if col0 >= #line then return #line end
   local w = vim.fn.byteidx(line:sub(col0 + 1), 1) -- bytes of the first char
   return col0 + (w > 0 and w or 1)
 end
 
+-- Start position and extmark options covering the last visual selection.
+local function selection_range(buf, linewise)
+  local sp, ep = vim.fn.getpos("'<"), vim.fn.getpos("'>")
+  local s_row, s_col = sp[2] - 1, sp[3] - 1
+  local e_row, e_col = ep[2] - 1, ep[3] - 1
+
+  if linewise then
+    local last = api.nvim_buf_get_lines(buf, e_row, e_row + 1, false)[1] or ""
+    return s_row, 0, { end_row = e_row, end_col = #last, hl_group = "GhostCut" }
+  end
+  return s_row, s_col, { end_row = e_row, end_col = char_end_col(buf, e_row, e_col), hl_group = "GhostCut" }
+end
+
 --- Ghost-cut the current visual selection.
 function M.cut()
-  local buf = vim.api.nvim_get_current_buf()
+  local buf = api.nvim_get_current_buf()
   if not eligible(buf) then return end
 
   -- Yank the selection: fills the unnamed register (so a plain copy still exists)
@@ -134,23 +161,11 @@ function M.cut()
   local linewise = rt == "V"
   local lines = vim.fn.getreg('"', 1, true)
 
-  local sp, ep = vim.fn.getpos("'<"), vim.fn.getpos("'>")
-  local s_row, s_col = sp[2] - 1, sp[3] - 1
-  local e_row, e_col = ep[2] - 1, ep[3] - 1
-
   -- A new cut supersedes any un-pasted one.
   if pending then clear() end
 
-  local opts
-  if linewise then
-    s_col = 0
-    local last = vim.api.nvim_buf_get_lines(buf, e_row, e_row + 1, false)[1] or ""
-    opts = { end_row = e_row, end_col = #last, hl_group = "GhostCut" }
-  else
-    opts = { end_row = e_row, end_col = char_end_col(buf, e_row, e_col), hl_group = "GhostCut" }
-  end
-
-  local ok, id = pcall(vim.api.nvim_buf_set_extmark, buf, ns, s_row, s_col, opts)
+  local s_row, s_col, opts = selection_range(buf, linewise)
+  local ok, id = pcall(api.nvim_buf_set_extmark, buf, ns, s_row, s_col, opts)
   if not ok then return end
 
   pending = { buf = buf, mark_id = id, lines = lines, linewise = linewise, n = #lines }
@@ -158,8 +173,8 @@ function M.cut()
 
   -- Follow the cursor across buffers: install the override on any eligible buffer
   -- entered while the cut is pending, so the ghost can be pasted anywhere.
-  pend_grp = vim.api.nvim_create_augroup("ghost-cut-pending", { clear = true })
-  vim.api.nvim_create_autocmd("BufEnter", {
+  pend_grp = api.nvim_create_augroup("ghost-cut-pending", { clear = true })
+  api.nvim_create_autocmd("BufEnter", {
     group = pend_grp,
     callback = function(ev)
       if pending and eligible(ev.buf) then install_put_maps(ev.buf) end
@@ -173,24 +188,24 @@ end
 function M.paste(after)
   local st = pending
   if not st then return end
-  local cur = vim.api.nvim_get_current_buf()
+  local cur = api.nvim_get_current_buf()
 
   -- Insert at the cursor like a real paste (cursor follows to the moved text).
-  vim.api.nvim_put(st.lines, st.linewise and "l" or "c", after, true)
+  api.nvim_put(st.lines, st.linewise and "l" or "c", after, true)
 
   -- Delete the original. Read the extmark's *current* position (it auto-shifts if
   -- the insert above pushed it). For a same-buffer move, join the delete to the
   -- insert so one `u` undoes the whole thing; across buffers they live in
   -- separate undo histories, so don't (a dangling undojoin could mis-join later).
-  if vim.api.nvim_buf_is_valid(st.buf) then
-    local pos = vim.api.nvim_buf_get_extmark_by_id(st.buf, ns, st.mark_id, { details = true })
+  if api.nvim_buf_is_valid(st.buf) then
+    local pos = api.nvim_buf_get_extmark_by_id(st.buf, ns, st.mark_id, { details = true })
     if pos and pos[1] then
       local s_row, s_col, details = pos[1], pos[2], pos[3]
       if st.buf == cur then vim.cmd("silent! undojoin") end
       if st.linewise then
-        vim.api.nvim_buf_set_lines(st.buf, s_row, s_row + st.n, false, {})
+        api.nvim_buf_set_lines(st.buf, s_row, s_row + st.n, false, {})
       else
-        vim.api.nvim_buf_set_text(st.buf, s_row, s_col, details.end_row or s_row, details.end_col or s_col, {})
+        api.nvim_buf_set_text(st.buf, s_row, s_col, details.end_row or s_row, details.end_col or s_col, {})
       end
     end
   end
@@ -215,9 +230,9 @@ function M.setup(opts)
   cfg = vim.tbl_deep_extend("force", vim.deepcopy(defaults), opts or {})
   clear() -- drop any in-flight ghost if reconfiguring
 
-  grp = vim.api.nvim_create_augroup("ghost-cut", { clear = true })
+  local grp = api.nvim_create_augroup("ghost-cut", { clear = true })
   set_hl()
-  vim.api.nvim_create_autocmd("ColorScheme", { group = grp, callback = set_hl })
+  api.nvim_create_autocmd("ColorScheme", { group = grp, callback = set_hl })
 
   local function map_cut(buf)
     vim.keymap.set("x", cfg.cut_key, M.cut,
@@ -227,7 +242,7 @@ function M.setup(opts)
   if cfg.filetypes and #cfg.filetypes > 0 then
     -- Buffer-local trigger on the configured filetypes only, so any global
     -- binding on the key is preserved elsewhere.
-    vim.api.nvim_create_autocmd("FileType", {
+    api.nvim_create_autocmd("FileType", {
       group = grp,
       pattern = cfg.filetypes,
       callback = function(ev) map_cut(ev.buf) end,
@@ -239,9 +254,9 @@ function M.setup(opts)
   end
 
   if cfg.commands then
-    vim.api.nvim_create_user_command("GhostCutPaste", function() M.paste(true) end,
+    api.nvim_create_user_command("GhostCutPaste", function() M.paste(true) end,
       { desc = "Paste the pending ghost cut" })
-    vim.api.nvim_create_user_command("GhostCutCancel", function() M.cancel() end,
+    api.nvim_create_user_command("GhostCutCancel", function() M.cancel() end,
       { desc = "Cancel the pending ghost cut" })
   end
 end
